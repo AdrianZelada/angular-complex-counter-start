@@ -12,6 +12,9 @@ Objectives:
 
 export enum CountActionType {
   UpdateCountDiff,
+  UpdateCountSpeed,
+  UpdateCount,
+  CountDown,
   CountUp,
   Pause,
   Reset,
@@ -22,6 +25,7 @@ export enum CountActionType {
 export interface CountState {
   count: number,
   countDiff: number,
+  timeout: number
 }
 
 export interface CountAction {
@@ -32,14 +36,20 @@ export interface CountAction {
 const initialState: CountState = {
   count: 0,
   countDiff: 1,
+  timeout: 1000
 };
 
 @Injectable()
 export class CountService {
 
+constructor() {
+  this.interval$ = this.getInterval(1000);
+}
   private actions$ = new BehaviorSubject<CountAction>({
     actionType: CountActionType.Reset
   });
+
+  private interval$ : Observable<any>;
 
   state$: Observable<CountState> = merge(
     this.actions$,
@@ -55,6 +65,10 @@ export class CountService {
           return { ...initialState };
         case CountActionType.UpdateCountDiff:
           return { ...state, countDiff: parseInt(payload)}
+        case CountActionType.UpdateCountSpeed:
+          return { ...state, timeout: parseInt(payload)}
+        case CountActionType.UpdateCount:
+          return { ...state, count: (parseInt(payload) || 0)}
       }
       return state;
     }, { ...initialState }),
@@ -63,14 +77,45 @@ export class CountService {
   timerCount$ = this.actions$.pipe(
     filter(({actionType}) =>
       actionType === CountActionType.CountUp ||
+      actionType === CountActionType.CountDown ||
+      actionType === CountActionType.UpdateCountSpeed ||
       actionType === CountActionType.Pause),
-    switchMap(({actionType}) =>
-      actionType === CountActionType.CountUp ? interval(1000) : NEVER),
-    map(() => this.buildAction(CountActionType.Add)),
+    switchMap(({actionType, payload}) =>{
+      let obs: any ;
+      switch (actionType) {
+        case CountActionType.CountUp: 
+          obs = this.interval$.pipe(
+            map(()=>this.buildAction(CountActionType.Add))
+          );
+        break;
+        case CountActionType.UpdateCountSpeed: 
+          this.interval$ = this.getInterval(parseInt(payload) || 1000);
+          obs = this.interval$.pipe(
+            map(()=>this.buildAction(CountActionType.Add))
+          );
+        break;
+        case CountActionType.Pause: 
+          obs = NEVER;
+        break;
+        case CountActionType.CountDown: 
+          obs = this.interval$.pipe(
+            map(()=>this.buildAction(CountActionType.Subtract))
+          );
+        break;
+      }
+
+      return obs;
+    }),
+
+    // map(() => this.buildAction(CountActionType.Add)),
   )
 
   dispatch(actionType: CountActionType, payload?: any) {
     this.actions$.next(this.buildAction(actionType, payload));
+  }
+
+  getInterval(time) {
+    return interval(time);
   }
 
   private buildAction(actionType: CountActionType, payload?: any): CountAction {
